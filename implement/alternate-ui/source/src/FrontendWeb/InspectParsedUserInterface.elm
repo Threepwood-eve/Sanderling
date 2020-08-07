@@ -513,6 +513,9 @@ treeNodeChildrenFromInfoPanelLocationInfo viewConfig infoPanelLocationInfo =
           , fieldValueChildren = always [ treeViewNodeFromUINode viewConfig infoPanelLocationInfo.listSurroundingsButton ]
           }
         , infoPanelLocationInfo.securityStatusPercent |> fieldFromMaybeInt "securityStatusPercent"
+        , infoPanelLocationInfo.currentSolarSystem |> fieldFromMaybeString "currentSolarSystem"
+        , infoPanelLocationInfo.currentConstellation |> fieldFromMaybeString "currentConstellation"
+        , infoPanelLocationInfo.currentRegion |> fieldFromMaybeString "currentRegion"
         ]
 
 
@@ -545,6 +548,25 @@ treeNodeChildrenFromInfoPanelAgentMissions viewConfig infoPanelAgentMissions =
                 { fieldName = "entries"
                 , fieldValueChildren = .uiNode >> treeViewNodeFromUINode viewConfig >> List.singleton
                 }
+        , infoPanelAgentMissions.nextActionButton
+            |> fieldFromMaybeInstance
+                { fieldName = "nextActionButton"
+                , fieldValueSummary = always "..."
+                , fieldValueChildren = treeNodeNextActionButton viewConfig
+                }
+        ]
+
+
+treeNodeNextActionButton :
+    ViewConfig event
+    -> EveOnline.ParseUserInterface.NextActionButton
+    -> List (TreeViewNode event ParsedUITreeViewPathNode)
+treeNodeNextActionButton viewConfig nextActionButton =
+    treeNodeChildrenFromRecordWithUINode
+        viewConfig
+        nextActionButton.uiNode
+        [ nextActionButton.name |> fieldFromMaybeString "name"
+        , nextActionButton.label |> fieldFromMaybeString "label"
         ]
 
 
@@ -747,6 +769,44 @@ treeNodeChildrenFromStationWindow viewConfig stationWindow =
                 , fieldValueSummary = always "..."
                 , fieldValueChildren = treeViewNodeFromUINode viewConfig >> List.singleton
                 }
+        , stationWindow.stationAgentPanelContent
+            |> fieldFromMaybeVisibleInstance
+                { fieldName = "stationAgentPanelContent"
+                , fieldValueSummary = always "..."
+                , fieldValueChildren = treeNodeChildrenFromStationAgentPanelContent viewConfig
+                }
+        ]
+
+
+treeNodeChildrenFromStationAgentPanelContent :
+    ViewConfig event
+    -> EveOnline.ParseUserInterface.StationAgentPanelContent
+    -> List (TreeViewNode event ParsedUITreeViewPathNode)
+treeNodeChildrenFromStationAgentPanelContent viewConfig stationAgentPanelContent =
+    treeNodeChildrenFromRecordWithUINode
+        viewConfig
+        stationAgentPanelContent.uiNode
+        [ stationAgentPanelContent.agents
+            |> fieldFromListInstance
+                { fieldName = "agents"
+                , fieldValueChildren = treeNodeChildrenFromStationAgentPanelContentAgents viewConfig
+                }
+        ]
+
+
+treeNodeChildrenFromStationAgentPanelContentAgents :
+    ViewConfig event
+    -> EveOnline.ParseUserInterface.StationAgent
+    -> List (TreeViewNode event ParsedUITreeViewPathNode)
+treeNodeChildrenFromStationAgentPanelContentAgents viewConfig stationAgent =
+    treeNodeChildrenFromRecordWithUINode
+        viewConfig
+        stationAgent.uiNode
+        [ stationAgent.header |> fieldFromMaybeString "header"
+        , stationAgent.name |> fieldFromMaybeString "name"
+        , stationAgent.level |> fieldFromMaybeInt "level"
+        , stationAgent.division |> fieldFromMaybeString "division"
+        , stationAgent.missionState |> fieldFromMaybeString "missionState"
         ]
 
 

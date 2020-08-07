@@ -11,6 +11,7 @@ import Set
 
 type alias ParsedUserInterface =
     { uiTree : UITreeNodeWithDisplayRegion
+    , debugStr : Maybe String
     , contextMenus : List ContextMenu
     , shipUI : MaybeVisible ShipUI
     , targets : List Target
@@ -128,6 +129,7 @@ type ShipManeuverType
     | ManeuverJump
     | ManeuverOrbit
     | ManeuverApproach
+    | ManeuverDock
 
 
 type alias InfoPanelContainer =
@@ -165,6 +167,9 @@ type alias InfoPanelLocationInfo =
     , listSurroundingsButton : UITreeNodeWithDisplayRegion
     , expandedContent : MaybeVisible InfoPanelLocationInfoExpandedContent
     , securityStatusPercent : Maybe Int
+    , currentSolarSystem : Maybe String
+    , currentConstellation : Maybe String
+    , currentRegion : Maybe String
     }
 
 
@@ -176,6 +181,14 @@ type alias InfoPanelLocationInfoExpandedContent =
 type alias InfoPanelAgentMissions =
     { uiNode : UITreeNodeWithDisplayRegion
     , entries : List InfoPanelAgentMissionsEntry
+    , nextActionButton : Maybe NextActionButton
+    }
+
+
+type alias NextActionButton =
+    { uiNode : UITreeNodeWithDisplayRegion
+    , name : Maybe String
+    , label : Maybe String
     }
 
 
@@ -308,6 +321,23 @@ type alias StationWindow =
     { uiNode : UITreeNodeWithDisplayRegion
     , undockButton : Maybe UITreeNodeWithDisplayRegion
     , abortUndockButton : Maybe UITreeNodeWithDisplayRegion
+    , stationAgentPanelContent : MaybeVisible StationAgentPanelContent
+    }
+
+
+type alias StationAgentPanelContent =
+    { uiNode : UITreeNodeWithDisplayRegion
+    , agents : List StationAgent
+    }
+
+
+type alias StationAgent =
+    { uiNode : UITreeNodeWithDisplayRegion
+    , header : Maybe String
+    , name : Maybe String
+    , level : Maybe Int
+    , division : Maybe String
+    , missionState : Maybe String
     }
 
 
@@ -446,6 +476,7 @@ parseUserInterfaceFromUITree uiTree =
     { uiTree = uiTree
     , contextMenus = parseContextMenusFromUITreeRoot uiTree
     , shipUI = parseShipUIFromUITreeRoot uiTree
+    , debugStr = Just "hallo"
     , targets = parseTargetsFromUITreeRoot uiTree
     , infoPanelContainer = parseInfoPanelContainerFromUIRoot uiTree
     , overviewWindow = parseOverviewWindowFromUITreeRoot uiTree
@@ -609,6 +640,21 @@ parseInfoPanelLocationInfoFromInfoPanelContainer infoPanelContainerNode =
 
         Just infoPanelNode ->
             let
+                parseContainedDisplayTexts : String -> Int -> Int -> Maybe String
+                parseContainedDisplayTexts regexString sliceStart sliceEnd =
+                    let
+                        getInfoFromUINodeText : String -> Maybe String
+                        getInfoFromUINodeText text =
+                            regexString
+                                |> Regex.fromString
+                                |> Maybe.andThen (\regex -> text |> Regex.find regex |> List.head)
+                                |> Maybe.map (.match >> String.slice sliceStart sliceEnd)
+                    in
+                    infoPanelNode.uiNode
+                        |> getAllContainedDisplayTexts
+                        |> List.filterMap getInfoFromUINodeText
+                        |> List.head
+
                 getSecurityStatusPercentFromUINodeText : String -> Maybe Int
                 getSecurityStatusPercentFromUINodeText =
                     String.replace " " ""
@@ -625,6 +671,19 @@ parseInfoPanelLocationInfoFromInfoPanelContainer infoPanelContainerNode =
                         |> getAllContainedDisplayTexts
                         |> List.filterMap getSecurityStatusPercentFromUINodeText
                         |> List.head
+
+                currentSolarSystem =
+                    parseContainedDisplayTexts "alt='Current Solar System'>.*?</url>" 27 -6
+
+                currentConstellation =
+                    parseContainedDisplayTexts "<url=showinfo:4//\\d*>.*?</url>" 20 -6
+                        |> Maybe.map (String.split ">" >> List.drop 1)
+                        |> Maybe.andThen List.head
+
+                currentRegion =
+                    parseContainedDisplayTexts "<url=showinfo:3//\\d*>.*?</url>" 20 -6
+                        |> Maybe.map (String.split ">" >> List.drop 1)
+                        |> Maybe.andThen List.head
 
                 maybeListSurroundingsButton =
                     infoPanelNode
@@ -659,6 +718,9 @@ parseInfoPanelLocationInfoFromInfoPanelContainer infoPanelContainerNode =
                         , listSurroundingsButton = listSurroundingsButton
                         , expandedContent = expandedContent
                         , securityStatusPercent = securityStatusPercent
+                        , currentSolarSystem = currentSolarSystem
+                        , currentConstellation = currentConstellation
+                        , currentRegion = currentRegion
                         }
                     )
                 |> canNotSeeItFromMaybeNothing
@@ -727,10 +789,34 @@ parseInfoPanelAgentMissionsFromInfoPanelContainer infoPanelContainerNode =
                         |> listDescendantsWithDisplayRegion
                         |> List.filter (.uiNode >> .pythonObjectTypeName >> (==) "MissionEntry")
                         |> List.map (\uiNode -> { uiNode = uiNode })
+
+                nextActionButton =
+                    case
+                        infoPanelNode
+                            |> listDescendantsWithDisplayRegion
+                            |> List.filter (.uiNode >> .pythonObjectTypeName >> (==) "DarkStyleStatefulPrimaryButton")
+                            |> List.head
+                    of
+                        Nothing ->
+                            Nothing
+
+                        Just nextActionNode ->
+                            let
+                                name =
+                                    nextActionNode
+                                        |> (.uiNode >> getNameFromDictEntries)
+
+                                label =
+                                    nextActionNode
+                                        |> (.uiNode >> getAllContainedDisplayTexts)
+                                        |> List.head
+                            in
+                            Just { uiNode = nextActionNode, name = name, label = label }
             in
             CanSee
                 { uiNode = infoPanelNode
                 , entries = entries
+                , nextActionButton = nextActionButton
                 }
 
 
@@ -1032,6 +1118,7 @@ parseShipUIIndication indicationUINode =
             , ( "Jump", ManeuverJump )
             , ( "Orbit", ManeuverOrbit )
             , ( "Approach", ManeuverApproach )
+            , ( "Dock", ManeuverDock )
             ]
                 |> List.filterMap
                     (\( pattern, candidateManeuverType ) ->
@@ -1530,6 +1617,108 @@ parseStationWindowFromUITreeRoot uiTreeRoot =
                 { uiNode = windowNode
                 , undockButton = buttonFromDisplayText "undock"
                 , abortUndockButton = buttonFromDisplayText "undocking"
+                , stationAgentPanelContent = parseStationAgentPanelContent windowNode
+                }
+
+
+parseStationAgentPanelContent : UITreeNodeWithDisplayRegion -> MaybeVisible StationAgentPanelContent
+parseStationAgentPanelContent windowNode =
+    let
+        parseAgents agentPanelNode =
+            let
+                nodes =
+                    agentPanelNode
+                        |> listChildrenWithDisplayRegion
+                        |> List.sortBy (.uiNode >> getStringPropertyFromDictEntries "_displayY" >> Maybe.andThen String.toInt >> Maybe.withDefault 999999)
+
+                addAgents node ( oldHeader, oldList ) =
+                    let
+                        newHeader =
+                            if node.uiNode.pythonObjectTypeName == "Header" then
+                                node.uiNode
+                                    |> getAllContainedDisplayTexts
+                                    |> List.head
+
+                            else
+                                oldHeader
+
+                        newList =
+                            if node.uiNode.pythonObjectTypeName == "AgentEntry" then
+                                let
+                                    textFromLebelName label =
+                                        node
+                                            |> listDescendantsWithDisplayRegion
+                                            |> List.filter (.uiNode >> getNameFromDictEntries >> Maybe.map ((==) label) >> Maybe.withDefault False)
+                                            |> List.head
+                                            |> Maybe.andThen (.uiNode >> getDisplayText)
+                                            |> Maybe.map String.trim
+
+                                    nameLabel =
+                                        textFromLebelName "nameLabel"
+
+                                    name =
+                                        nameLabel
+                                            |> Maybe.map (String.split "<color")
+                                            |> Maybe.andThen List.head
+                                            |> Maybe.map String.trim
+
+                                    level =
+                                        nameLabel
+                                            |> Maybe.map (String.split ">Level")
+                                            |> Maybe.map (List.drop 1)
+                                            |> Maybe.andThen List.head
+                                            |> Maybe.map (String.split "</color>")
+                                            |> Maybe.andThen List.head
+                                            |> Maybe.map String.trim
+                                            |> Maybe.andThen String.toInt
+
+                                    missionState =
+                                        textFromLebelName "missionLabel"
+                                            |> Maybe.map (String.split "'>")
+                                            |> Maybe.map (List.drop 1)
+                                            |> Maybe.andThen List.head
+                                            |> Maybe.map (String.split "</color>")
+                                            |> Maybe.andThen List.head
+                                            |> Maybe.map String.trim
+                                in
+                                oldList
+                                    ++ [ { uiNode = node
+                                         , header = newHeader
+                                         , name = name
+                                         , level = level
+                                         , division = textFromLebelName "levelLabel" --yes, the agent's division is labeled as level
+                                         , missionState = missionState
+                                         }
+                                       ]
+
+                            else
+                                oldList
+                    in
+                    ( newHeader, newList )
+
+                ( _, agents ) =
+                    List.foldl addAgents ( Nothing, [] ) nodes
+            in
+            --nodes |> List.map (\e -> { uiNode = e, name = Nothing, header = Nothing })
+            agents
+    in
+    case
+        windowNode
+            |> listDescendantsWithDisplayRegion
+            |> List.filter (.uiNode >> getNameFromDictEntries >> Maybe.map ((==) "agentsPanel") >> Maybe.withDefault False)
+            |> List.head
+            |> Maybe.map listDescendantsWithDisplayRegion
+            |> Maybe.withDefault []
+            |> List.filter (.uiNode >> getNameFromDictEntries >> Maybe.map ((==) "__content") >> Maybe.withDefault False)
+            |> List.head
+    of
+        Nothing ->
+            CanNotSeeIt
+
+        Just agentPanelNode ->
+            CanSee
+                { uiNode = agentPanelNode
+                , agents = parseAgents agentPanelNode
                 }
 
 
